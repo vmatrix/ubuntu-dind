@@ -72,7 +72,8 @@ Startup flow:
 ```json
 {
   "data-root": "/var/lib/docker-ext4",
-  "storage-driver": "overlay2"
+  "storage-driver": "overlay2",
+  "ip-forward": false
 }
 ```
 
@@ -85,7 +86,10 @@ DOCKER_EXT4_SIZE=50G              # size for a newly-created backing image
 DOCKER_EXT4_IMG=/var/lib/docker.ext4.img
 DOCKER_DATA_ROOT=/var/lib/docker-ext4
 DOCKER_STORAGE_DRIVER=overlay2
+DOCKER_IP_FORWARD=false             # avoid writing read-only /proc/sys/net/ipv4/ip_forward in Kata pods
 ```
+
+`DOCKER_IP_FORWARD=false` is the default because many Kubernetes/Kata pods expose `/proc/sys/net/ipv4/ip_forward` as read-only. If your cluster sets `net.ipv4.ip_forward=1` via pod sysctls or otherwise allows Docker to change it, set `DOCKER_IP_FORWARD=true`.
 
 The container still needs enough privileges for DinD: loop devices, `mknod`, `mount`, iptables/networking, and cgroups. In Kubernetes, `securityContext.privileged: true` is the simplest working mode.
 

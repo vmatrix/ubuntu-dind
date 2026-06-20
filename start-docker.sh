@@ -16,6 +16,11 @@ DOCKER_EXT4_IMG="${DOCKER_EXT4_IMG:-/var/lib/docker.ext4.img}"
 DOCKER_EXT4_SIZE="${DOCKER_EXT4_SIZE:-20G}"
 DOCKER_DATA_ROOT="${DOCKER_DATA_ROOT:-/var/lib/docker-ext4}"
 DOCKER_STORAGE_DRIVER="${DOCKER_STORAGE_DRIVER:-overlay2}"
+# In Kubernetes/Kata fine-grained security mode, /proc/sys/net/ipv4/ip_forward
+# is often mounted read-only. If true, dockerd tries to write that sysctl while
+# creating docker0 and fails. Default false; set DOCKER_IP_FORWARD=true only if
+# your pod/runtime allows that sysctl or sets it before dockerd starts.
+DOCKER_IP_FORWARD="${DOCKER_IP_FORWARD:-false}"
 DOCKERD_LOG="${DOCKERD_LOG:-/var/log/dockerd.out.log}"
 
 function wait_for_process () {
@@ -71,7 +76,8 @@ function configure_docker_daemon () {
     cat > /etc/docker/daemon.json <<EOF
 {
   "data-root": "${DOCKER_DATA_ROOT}",
-  "storage-driver": "${DOCKER_STORAGE_DRIVER}"
+  "storage-driver": "${DOCKER_STORAGE_DRIVER}",
+  "ip-forward": ${DOCKER_IP_FORWARD}
 }
 EOF
 }

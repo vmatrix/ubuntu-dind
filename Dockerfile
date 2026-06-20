@@ -61,7 +61,7 @@ RUN chmod +x /usr/local/bin/start-docker.sh \
 # Default daemon config for EKS/Kata/virtiofs DinD. start-docker.sh mounts a
 # loop-backed ext4 filesystem at this data-root before supervisor starts dockerd.
 RUN mkdir -p /etc/docker && \
-    printf '{\n  "data-root": "/var/lib/docker-ext4",\n  "storage-driver": "overlay2"\n}\n' > /etc/docker/daemon.json
+    printf '{\n  "data-root": "/var/lib/docker-ext4",\n  "storage-driver": "overlay2",\n  "ip-forward": false\n}\n' > /etc/docker/daemon.json
 
 VOLUME /var/lib/docker
 
