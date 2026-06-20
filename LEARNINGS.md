@@ -18,6 +18,7 @@
 14. [Recommended Kubernetes Manifests](#14-recommended-kubernetes-manifests)
 15. [Troubleshooting Playbook](#15-troubleshooting-playbook)
 16. [Key Takeaways](#16-key-takeaways)
+17. [External Validation References](#17-external-validation-references)
 
 ---
 
@@ -1043,3 +1044,66 @@ Run the DinD pod privileged inside that microVM.
 Set DOCKER_IP_FORWARD=true.
 Use loop-backed ext4 Docker data root.
 ```
+
+---
+
+## 17. External Validation References
+
+The findings in this document were validated against upstream documentation and issue reports:
+
+1. **Kata Containers isolation model**
+   - Kata describes itself as lightweight VMs that feel like containers while providing VM-style workload isolation.
+   - Kata's design docs describe a guest Linux kernel inside a lightweight VM, with Kubernetes pod sandboxes implemented using VMs.
+   - This validates the mental model: Kata/CLH provides VM isolation, but the workload is still launched through Kubernetes/OCI container semantics.
+   - References:
+     - https://github.com/kata-containers/kata-containers/blob/main/docs/design/virtualization.md
+     - https://github.com/kata-containers/kata-containers/blob/main/docs/threat-model/threat-model.md
+
+2. **Privileged Kata vs privileged runc**
+   - Kata's own limitations and privileged-container docs state privileged support differs from `runc`: elevated capabilities are applied inside the guest, and host device handling differs from normal privileged containers.
+   - Kata warns privileged mode can reduce security if misconfigured, so the correct claim is not "safe", but "safer blast radius than privileged runc because the guest VM is an additional isolation boundary".
+   - References:
+     - https://github.com/kata-containers/kata-containers/blob/main/docs/Limitations.md
+     - https://github.com/kata-containers/kata-containers/blob/main/docs/how-to/privileged.md
+
+3. **Docker + Kata + virtiofs storage problem**
+   - Kata documents that Docker containers under Kata need care because mounts can be `kataShared` / `virtiofs`.
+   - Existing Kata issue reports show Docker-in-Docker with virtio-fs hitting `overlay` mount `invalid argument` failures.
+   - Docker's overlay2 docs require a compatible backing filesystem; for example, Docker documents specific backing filesystem requirements such as XFS `d_type=true`.
+   - This validates the ext4 data-root workaround.
+   - References:
+     - https://github.com/kata-containers/kata-containers/blob/main/docs/how-to/how-to-run-docker-with-kata.md
+     - https://github.com/kata-containers/runtime/issues/1888
+     - https://docs.docker.com/engine/storage/drivers/overlayfs-driver/
+
+4. **Kubernetes capabilities and why root is not enough**
+   - Kubernetes securityContext docs describe adding Linux capabilities at the container level.
+   - Linux `capabilities(7)` documents `CAP_SYS_ADMIN`, `CAP_MKNOD`, and `CAP_NET_ADMIN`; these map directly to the observed mount, device-node, and Docker networking requirements.
+   - References:
+     - https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+     - https://man7.org/linux/man-pages/man7/capabilities.7.html
+
+5. **Kubernetes sysctls and `net.ipv4.ip_forward`**
+   - Kubernetes documents safe vs unsafe sysctls. `net.ipv4.ip_forward` is not in the default safe set and commonly requires kubelet `allowed-unsafe-sysctls` policy.
+   - Kubernetes issue reports show pods failing with `SysctlForbidden` for `net.ipv4.ip_forward` unless it is whitelisted.
+   - This validates why writing `/proc/sys/net/ipv4/ip_forward` from inside the pod can fail and why pod-level sysctls or privileged mode are needed.
+   - References:
+     - https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/
+     - https://github.com/kubernetes/kubernetes/issues/92266
+
+6. **Docker `ip-forward` and networking behavior**
+   - Docker's `dockerd` docs expose `--ip-forward`, defaulting true, and Docker networking docs explain Docker enables IP forwarding for bridge networking when needed.
+   - Docker networking docs and common Docker warnings validate the Compose warning: `IPv4 forwarding is disabled. Networking will not work.`
+   - References:
+     - https://docs.docker.com/reference/cli/dockerd/
+     - https://github.com/moby/moby/blob/master/man/dockerd.8.md
+     - https://docs.docker.com/engine/network/drivers/bridge/
+     - https://github.com/docker/docs/blob/main/content/manuals/engine/network/packet-filtering-firewalls.md
+
+7. **Kubernetes `command` and `args` behavior**
+   - Kubernetes docs state container `command` and `args` override the image's default command and arguments.
+   - This validates the observed behavior: using `command: ["sleep", "infinity"]` bypassed the image `ENTRYPOINT`, so `entrypoint.sh` and `start-docker.sh` did not run.
+   - Reference:
+     - https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/
+
+Overall validation result: the content in this document is consistent with upstream Kata, Docker, Linux, and Kubernetes documentation. The main nuance is that privileged Kata should be described as **reduced host blast radius compared with privileged runc**, not as inherently safe.
