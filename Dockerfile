@@ -12,6 +12,7 @@ ENV DOCKER_CHANNEL=stable \
 RUN set -eux; \
     apt-get update && apt-get install -y \
     ca-certificates wget curl iptables supervisor \
+    e2fsprogs util-linux mount \
     && rm -rf /var/lib/apt/lists/*
 
 # Set iptables backend per Ubuntu version:
@@ -51,10 +52,16 @@ RUN set -eux; \
 COPY modprobe start-docker.sh entrypoint.sh /usr/local/bin/
 COPY supervisor/ /etc/supervisor/conf.d/
 COPY logger.sh /opt/bash-utils/logger.sh
+COPY examples/dnsmasq-compose/ /opt/ubuntu-dind/examples/dnsmasq-compose/
 
 RUN chmod +x /usr/local/bin/start-docker.sh \
     /usr/local/bin/entrypoint.sh \
     /usr/local/bin/modprobe
+
+# Default daemon config for EKS/Kata/virtiofs DinD. start-docker.sh mounts a
+# loop-backed ext4 filesystem at this data-root before supervisor starts dockerd.
+RUN mkdir -p /etc/docker && \
+    printf '{\n  "data-root": "/var/lib/docker-ext4",\n  "storage-driver": "overlay2"\n}\n' > /etc/docker/daemon.json
 
 VOLUME /var/lib/docker
 

@@ -22,6 +22,87 @@ docker run -it --runtime=sysbox-runc cruizba/ubuntu-dind
 3. Support for arm64 and amd64 architectures.
 4. Easy to extend, customize and use.
 5. Always updated with current buildx, compose and docker versions.
+6. Patched for EKS + Kata Containers / Cloud Hypervisor DinD where the container root filesystem is `virtiofs`.
+
+## EKS + Kata / Cloud Hypervisor storage architecture
+
+In EKS pods backed by Kata Containers and Cloud Hypervisor, the container root filesystem is often mounted from the host into the microVM with `virtiofs`. Docker's `overlay2` driver needs an upper/work directory on a filesystem that supports the overlayfs features Docker requires. Using `virtiofs` directly as `/var/lib/docker` can let `dockerd` start, but container creation can fail with errors like:
+
+```text
+failed to mount ... fstype: overlay ... err: invalid argument
+overlayfs: upper fs missing required features
+```
+
+This image works around that by creating a sparse ext4 image file, attaching it to a loop device, mounting it inside the container, and using that ext4 mount as Docker's data root.
+
+```mermaid
+flowchart TB
+    subgraph EKS["EKS worker node"]
+        Kubelet[kubelet / containerd]
+        subgraph VM["Kata microVM - Cloud Hypervisor"]
+            Pod["ubuntu-dind container"]
+            Rootfs["container rootfs on virtiofs"]
+            Img["/var/lib/docker.ext4.img sparse file"]
+            Loop["/dev/loopX"]
+            Ext4["ext4 mount: /var/lib/docker-ext4"]
+            Docker["dockerd"]
+            Overlay["overlay2 snapshots/layers"]
+            Child["nested Docker containers"]
+        end
+    end
+
+    Kubelet --> VM
+    Pod --> Rootfs
+    Rootfs --> Img
+    Img --> Loop
+    Loop --> Ext4
+    Docker --> Ext4
+    Ext4 --> Overlay
+    Docker --> Child
+```
+
+Startup flow:
+
+1. `entrypoint.sh` calls `start-docker.sh`.
+2. `start-docker.sh` creates missing loop device nodes, if needed.
+3. It creates `${DOCKER_EXT4_IMG:-/var/lib/docker.ext4.img}` as a sparse file, default size `${DOCKER_EXT4_SIZE:-20G}`.
+4. It formats the image as ext4 and mounts it at `${DOCKER_DATA_ROOT:-/var/lib/docker-ext4}`.
+5. It writes `/etc/docker/daemon.json` so Docker uses:
+
+```json
+{
+  "data-root": "/var/lib/docker-ext4",
+  "storage-driver": "overlay2"
+}
+```
+
+6. It starts `dockerd` via supervisor and waits until `docker info` succeeds.
+
+Useful knobs:
+
+```bash
+DOCKER_EXT4_SIZE=50G              # size for a newly-created backing image
+DOCKER_EXT4_IMG=/var/lib/docker.ext4.img
+DOCKER_DATA_ROOT=/var/lib/docker-ext4
+DOCKER_STORAGE_DRIVER=overlay2
+```
+
+The container still needs enough privileges for DinD: loop devices, `mknod`, `mount`, iptables/networking, and cgroups. In Kubernetes, `securityContext.privileged: true` is the simplest working mode.
+
+A Compose smoke test for Docker networking plus local `dnsmasq` is included at:
+
+```bash
+/opt/ubuntu-dind/examples/dnsmasq-compose
+```
+
+Run inside the DinD container:
+
+```bash
+cd /opt/ubuntu-dind/examples/dnsmasq-compose
+docker compose up -d
+docker exec my_web_app nslookup my-web-app.local
+docker exec my_web_app wget -qO- http://my-web-app.local | head
+```
 
 ## Table of Contents
 

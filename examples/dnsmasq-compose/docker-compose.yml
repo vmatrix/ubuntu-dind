@@ -1,0 +1,27 @@
+services:
+  dnsmasq:
+    image: jpillora/dnsmasq:latest
+    container_name: local_dns
+    volumes:
+      - ./dnsmasq.conf:/etc/dnsmasq.conf:ro
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+    networks:
+      dev_network:
+        ipv4_address: 172.31.0.53
+
+  web_app:
+    image: nginx:alpine
+    container_name: my_web_app
+    dns:
+      - 172.31.0.53
+    networks:
+      dev_network:
+        ipv4_address: 172.31.0.10
+
+networks:
+  dev_network:
+    ipam:
+      config:
+        - subnet: 172.31.0.0/16
